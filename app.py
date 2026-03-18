@@ -19,6 +19,27 @@ BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+
+def get_gspread_client():
+    """Get authenticated gspread client — supports both local file and env var credentials"""
+    import gspread
+    from google.oauth2.service_account import Credentials
+    
+    SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+    
+    # Try environment variable first (for cloud deployment)
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+    if creds_json:
+        import json as _json
+        creds_info = _json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    else:
+        # Fall back to local file
+        CREDENTIALS_FILE = BASE_DIR / 'credentials.json'
+        creds = Credentials.from_service_account_file(str(CREDENTIALS_FILE), scopes=SCOPES)
+    
+    return gspread.authorize(creds)
+
 # Task status tracking
 tasks = {}
 
@@ -358,9 +379,6 @@ def api_files():
 def api_update_shipping():
     """Update shipping date/cost in Google Sheet"""
     try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-        
         data = request.json
         month = data.get('month', 3)
         updates = data.get('updates', [])  # [{customer, ship_date, ship_cost}]
@@ -368,10 +386,7 @@ def api_update_shipping():
         if not updates:
             return jsonify({'error': 'ไม่มีข้อมูลให้อัปเดต'}), 400
         
-        CREDENTIALS_FILE = BASE_DIR / 'credentials.json'
-        SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_file(str(CREDENTIALS_FILE), scopes=SCOPES)
-        gc = gspread.authorize(creds)
+        gc = get_gspread_client()
         
         sheet_name = SHEET_NAMES.get(month, f'{THAI_MONTHS.get(month, month)}69')
         ws = gc.open('บัญชี HDG 69').worksheet(sheet_name)
@@ -473,8 +488,6 @@ def api_mark_shipped():
 def api_sort_sheet():
     """เรียงข้อมูลใน Google Sheet ตามวันที่ (เก่า→ใหม่)"""
     try:
-        import gspread
-        from google.oauth2.service_account import Credentials
         import time as _time
         
         data = request.json
@@ -486,10 +499,7 @@ def api_sort_sheet():
                    'H': 8, 'I': 9, 'J': 10, 'K': 11, 'L': 12, 'M': 13, 'N': 14, 'O': 15}
         sort_col_idx = COL_MAP.get(sort_col, 2) - 1  # 0-based index
         
-        CREDENTIALS_FILE = BASE_DIR / 'credentials.json'
-        SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-        creds = Credentials.from_service_account_file(str(CREDENTIALS_FILE), scopes=SCOPES)
-        gc = gspread.authorize(creds)
+        gc = get_gspread_client()
         
         sheet_name = SHEET_NAMES.get(month, f'{THAI_MONTHS.get(month, month)}69')
         ws = gc.open('บัญชี HDG 69').worksheet(sheet_name)
@@ -2241,11 +2251,12 @@ HTML_TEMPLATE = r"""
 
 
 if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
     print("\n" + "=" * 50)
     print("📦 HDG Orders Dashboard")
     print("=" * 50)
-    print(f"\n🌐 เปิด browser ไปที่: http://localhost:5000")
+    print(f"\n🌐 เปิด browser ไปที่: http://localhost:{port}")
     print(f"📂 โฟลเดอร์: {BASE_DIR}")
     print(f"\nกด Ctrl+C เพื่อหยุด\n")
     
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False)
