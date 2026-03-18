@@ -19,6 +19,9 @@ BASE_DIR = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Detect cloud deployment (Render sets RENDER=true)
+IS_CLOUD = bool(os.environ.get('RENDER') or os.environ.get('GOOGLE_CREDENTIALS_JSON'))
+
 
 def get_gspread_client():
     """Get authenticated gspread client — supports both local file and env var credentials"""
@@ -299,6 +302,9 @@ def api_cleanup_json():
 @app.route('/api/fetch-orders', methods=['POST'])
 def api_fetch_orders():
     """Start fetching orders from FB"""
+    if IS_CLOUD:
+        return jsonify({'error': '⚠️ ฟีเจอร์นี้ใช้ได้เฉพาะบนเครื่อง local เท่านั้น (ต้องใช้ browser สำหรับ Facebook)'}), 400
+    
     month = request.json.get('month', 3)
     task_id = f'fetch_{int(time.time())}'
     
@@ -338,6 +344,9 @@ def api_sync_sheet():
 @app.route('/api/fetch-bills', methods=['POST'])
 def api_fetch_bills():
     """Fetch shipping bills from chat"""
+    if IS_CLOUD:
+        return jsonify({'error': '⚠️ ฟีเจอร์นี้ใช้ได้เฉพาะบนเครื่อง local เท่านั้น (ต้องใช้ browser สำหรับ Facebook)'}), 400
+    
     json_file = request.json.get('json_file', '')
     
     if not json_file:
@@ -469,6 +478,9 @@ def api_update_shipping():
 @app.route('/api/mark-shipped', methods=['POST'])
 def api_mark_shipped():
     """Mark order as shipped on Facebook"""
+    if IS_CLOUD:
+        return jsonify({'error': '⚠️ ฟีเจอร์นี้ใช้ได้เฉพาะบนเครื่อง local เท่านั้น (ต้องใช้ browser สำหรับ Facebook)'}), 400
+    
     data = request.json
     order_number = data.get('order_number', '')
     customer = data.get('customer', '')
