@@ -315,6 +315,42 @@ def api_fetch_orders():
     return jsonify({'task_id': task_id, 'message': f'กำลังดึง orders เดือน {THAI_MONTHS.get(month, month)}...'})
 
 
+@app.route('/api/upload-orders', methods=['POST'])
+def api_upload_orders():
+    """Upload orders JSON file (for cloud deployment)"""
+    if 'file' not in request.files:
+        # Try JSON body upload
+        data = request.json
+        if data and isinstance(data, list):
+            filename = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            filepath = OUTPUT_DIR / filename
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return jsonify({'success': True, 'filename': filename, 'count': len(data)})
+        return jsonify({'error': 'ไม่พบไฟล์'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'ไม่ได้เลือกไฟล์'}), 400
+    
+    if not file.filename.endswith('.json'):
+        return jsonify({'error': 'รองรับเฉพาะไฟล์ .json'}), 400
+    
+    try:
+        content = file.read().decode('utf-8')
+        orders = json.loads(content)
+        
+        filename = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        filepath = OUTPUT_DIR / filename
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(orders, f, ensure_ascii=False, indent=2)
+        
+        count = len(orders) if isinstance(orders, list) else 0
+        return jsonify({'success': True, 'filename': filename, 'count': count})
+    except Exception as e:
+        return jsonify({'error': f'ไฟล์ JSON ไม่ถูกต้อง: {str(e)}'}), 400
+
+
 @app.route('/api/sync-sheet', methods=['POST'])
 def api_sync_sheet():
     """Sync orders to Google Sheet"""
@@ -1532,6 +1568,10 @@ HTML_TEMPLATE = r"""
                     <button class="btn btn-primary" onclick="fetchOrders()" id="btnFetch">
                         ▶ ดึง Orders
                     </button>
+                    <button class="btn btn-outline" onclick="document.getElementById('uploadJsonInput').click()">
+                        📤 อัปโหลด JSON
+                    </button>
+                    <input type="file" id="uploadJsonInput" accept=".json" style="display:none" onchange="uploadOrders(this)">
                 </div>
             </div>
             
@@ -1868,12 +1908,43 @@ HTML_TEMPLATE = r"""
                     body: JSON.stringify({month: parseInt(month)})
                 });
                 const data = await resp.json();
+                if (data.error) {
+                    alert(data.error);
+                    btn.disabled = false;
+                    btn.textContent = '▶ ดึง Orders';
+                    return;
+                }
                 showStatus(data.message, data.task_id);
             } catch(e) {
                 alert('Error: ' + e.message);
                 btn.disabled = false;
                 btn.textContent = '▶ ดึง Orders';
             }
+        }
+        
+        async function uploadOrders(input) {
+            if (!input.files || !input.files[0]) return;
+            const file = input.files[0];
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const resp = await fetch('/api/upload-orders', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    alert('❌ ' + data.error);
+                } else {
+                    alert(`✅ อัปโหลดสำเร็จ!\n\nไฟล์: ${data.filename}\nจำนวน orders: ${data.count}`);
+                    loadOrders();
+                }
+            } catch(e) {
+                alert('Error: ' + e.message);
+            }
+            input.value = '';
         }
         
         async function syncSheet(dryRun) {
