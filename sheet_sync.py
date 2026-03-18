@@ -7,6 +7,7 @@ Usage:
 """
 import argparse
 import json
+import os
 import gspread
 from google.oauth2.service_account import Credentials
 from pathlib import Path
@@ -44,8 +45,14 @@ def parse_date(date_str):
 
 
 def connect_sheet(sheet_name):
-    """เชื่อมต่อ Google Sheet"""
-    creds = Credentials.from_service_account_file(str(CREDENTIALS_FILE), scopes=SCOPES)
+    """เชื่อมต่อ Google Sheet — รองรับทั้ง local file และ env var credentials"""
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+    if creds_json:
+        creds_info = json.loads(creds_json)
+        creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    else:
+        creds = Credentials.from_service_account_file(str(CREDENTIALS_FILE), scopes=SCOPES)
+    
     gc = gspread.authorize(creds)
     sh = gc.open(SPREADSHEET_NAME)
     ws = sh.worksheet(sheet_name)
