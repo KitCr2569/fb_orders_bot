@@ -277,6 +277,7 @@ def api_dismiss_split():
     if not order_number:
         return jsonify({'error': 'ต้องระบุ order_number'}), 400
     
+    # Update local JSON files
     json_files = sorted(OUTPUT_DIR.glob("orders_*.json"), reverse=True)
     updated = False
     
@@ -289,9 +290,27 @@ def api_dismiss_split():
                     json.dump(orders, f, ensure_ascii=False, indent=2)
                 updated = True
                 print(f"🚫 Dismiss split for order #{order_number} → {jf.name}")
+                # Also update Google Sheets cache
+                if IS_CLOUD:
+                    save_orders_to_sheet(orders)
                 break
         if updated:
             break
+    
+    # If no local file found (cloud), try updating sheets cache directly
+    if not updated and IS_CLOUD:
+        try:
+            cached = load_orders_from_sheet()
+            for o in cached:
+                if o.get('order_number', '').replace('#', '') == order_number.replace('#', ''):
+                    o['dismiss_split'] = True
+                    updated = True
+                    break
+            if updated:
+                save_orders_to_sheet(cached)
+                print(f"🚫 Dismiss split for order #{order_number} → sheets_cache")
+        except Exception as e:
+            print(f"Error updating sheets cache: {e}")
     
     if not updated:
         return jsonify({'error': f'ไม่พบ order #{order_number}'}), 404
@@ -1999,6 +2018,35 @@ HTML_TEMPLATE = r"""
                 alert('Error: ' + e.message);
             }
             input.value = '';
+        }
+        
+        async function dismissSplit(btn, orderNumber) {
+            try {
+                btn.disabled = true;
+                btn.textContent = '⏳';
+                const resp = await fetch('/api/dismiss-split', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({order_number: orderNumber})
+                });
+                const data = await resp.json();
+                if (data.error) {
+                    alert('❌ ' + data.error);
+                    btn.disabled = false;
+                    btn.textContent = '✓ OK';
+                } else {
+                    btn.textContent = '✅';
+                    btn.style.background = 'rgba(0,212,170,0.2)';
+                    btn.style.color = 'var(--green)';
+                    btn.style.borderColor = 'var(--green)';
+                    // Reload orders after brief delay
+                    setTimeout(() => loadOrders(), 500);
+                }
+            } catch(e) {
+                alert('Error: ' + e.message);
+                btn.disabled = false;
+                btn.textContent = '✓ OK';
+            }
         }
         
         async function syncSheet(dryRun) {
