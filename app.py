@@ -43,6 +43,43 @@ def get_gspread_client():
     
     return gspread.authorize(creds)
 
+
+def save_orders_to_sheet(orders):
+    """Save orders data to Google Sheets for persistent storage on cloud"""
+    try:
+        gc = get_gspread_client()
+        spreadsheet = gc.open('บัญชี HDG 69')
+        
+        # Get or create orders_cache worksheet
+        try:
+            ws = spreadsheet.worksheet('orders_cache')
+        except:
+            ws = spreadsheet.add_worksheet(title='orders_cache', rows=5, cols=2)
+        
+        # Store as JSON string in cell A1, timestamp in B1
+        orders_json = json.dumps(orders, ensure_ascii=False)
+        ws.update('A1', [[orders_json, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]])
+        return True
+    except Exception as e:
+        print(f'❌ Error saving to sheet cache: {e}')
+        return False
+
+
+def load_orders_from_sheet():
+    """Load orders data from Google Sheets cache"""
+    try:
+        gc = get_gspread_client()
+        spreadsheet = gc.open('บัญชี HDG 69')
+        ws = spreadsheet.worksheet('orders_cache')
+        
+        cell_value = ws.acell('A1').value
+        if cell_value:
+            return json.loads(cell_value)
+        return []
+    except Exception as e:
+        print(f'❌ Error loading from sheet cache: {e}')
+        return []
+
 # Task status tracking
 tasks = {}
 
@@ -121,17 +158,29 @@ def api_orders():
     """Get orders list"""
     month = request.args.get('month', type=int)
     
-    # Try to find JSON files
+    # Try local JSON files first
     json_files = sorted(OUTPUT_DIR.glob("orders_*.json"), reverse=True)
     
     all_orders = []
-    for jf in json_files[:5]:  # Check last 5 files
+    for jf in json_files[:5]:
         orders = load_orders(jf)
         for o in orders:
             if month and o.get('month') != month:
                 continue
             o['_source'] = jf.name
             all_orders.append(o)
+    
+    # If no local files and on cloud, try Google Sheets cache
+    if not all_orders and IS_CLOUD:
+        try:
+            cached = load_orders_from_sheet()
+            for o in cached:
+                if month and o.get('month') != month:
+                    continue
+                o['_source'] = 'sheets_cache'
+                all_orders.append(o)
+        except Exception as e:
+            print(f'Error loading from sheets: {e}')
     
     # Dedup by order_number
     seen = set()
@@ -148,7 +197,7 @@ def api_orders():
         try:
             parts = d.split('/')
             if len(parts) == 3:
-                return (int(parts[2]), int(parts[1]), int(parts[0]))  # (year, month, day)
+                return (int(parts[2]), int(parts[1]), int(parts[0]))
         except:
             pass
         return (0, 0, 0)
@@ -161,7 +210,6 @@ def api_orders():
             price = float(o.get('price', '0').replace(',', ''))
             products = o.get('products', [])
             has_individual_prices = all(p.get('price') for p in products) if products else False
-            # ต้องแยกถ้า: ราคา > 890 AND (มีแค่ 1 product หรือ products ไม่มีราคาย่อย)
             o['needs_split'] = (
                 price > 890 
                 and not o.get('split_manually') 
@@ -319,13 +367,15 @@ def api_fetch_orders():
 def api_upload_orders():
     """Upload orders JSON file (for cloud deployment)"""
     if 'file' not in request.files:
-        # Try JSON body upload
         data = request.json
         if data and isinstance(data, list):
             filename = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             filepath = OUTPUT_DIR / filename
             with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            # Also save to Google Sheets for persistence
+            if IS_CLOUD:
+                save_orders_to_sheet(data)
             return jsonify({'success': True, 'filename': filename, 'count': len(data)})
         return jsonify({'error': 'ไม่พบไฟล์'}), 400
     
@@ -344,6 +394,10 @@ def api_upload_orders():
         filepath = OUTPUT_DIR / filename
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(orders, f, ensure_ascii=False, indent=2)
+        
+        # Also save to Google Sheets for persistence
+        if IS_CLOUD:
+            save_orders_to_sheet(orders if isinstance(orders, list) else [])
         
         count = len(orders) if isinstance(orders, list) else 0
         return jsonify({'success': True, 'filename': filename, 'count': count})
