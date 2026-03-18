@@ -385,43 +385,50 @@ def api_fetch_orders():
 @app.route('/api/upload-orders', methods=['POST'])
 def api_upload_orders():
     """Upload orders JSON file (for cloud deployment)"""
+    orders = None
+    
     if 'file' not in request.files:
         data = request.json
         if data and isinstance(data, list):
-            filename = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            filepath = OUTPUT_DIR / filename
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            # Also save to Google Sheets for persistence
-            if IS_CLOUD:
-                save_orders_to_sheet(data)
-            return jsonify({'success': True, 'filename': filename, 'count': len(data)})
-        return jsonify({'error': 'ไม่พบไฟล์'}), 400
+            orders = data
+        else:
+            return jsonify({'error': 'ไม่พบไฟล์'}), 400
+    else:
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'ไม่ได้เลือกไฟล์'}), 400
+        if not file.filename.endswith('.json'):
+            return jsonify({'error': 'รองรับเฉพาะไฟล์ .json'}), 400
+        try:
+            content = file.read().decode('utf-8')
+            orders = json.loads(content)
+        except Exception as e:
+            return jsonify({'error': f'ไฟล์ JSON ไม่ถูกต้อง: {str(e)}'}), 400
     
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': 'ไม่ได้เลือกไฟล์'}), 400
-    
-    if not file.filename.endswith('.json'):
-        return jsonify({'error': 'รองรับเฉพาะไฟล์ .json'}), 400
+    if orders is None:
+        return jsonify({'error': 'ไม่พบข้อมูล orders'}), 400
     
     try:
-        content = file.read().decode('utf-8')
-        orders = json.loads(content)
+        # On cloud: delete ALL old order files first to prevent stale data
+        if IS_CLOUD:
+            old_files = list(OUTPUT_DIR.glob("orders_*.json"))
+            for f in old_files:
+                f.unlink()
         
+        # Save new file
         filename = f"orders_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         filepath = OUTPUT_DIR / filename
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(orders, f, ensure_ascii=False, indent=2)
         
-        # Also save to Google Sheets for persistence
+        # Save to Google Sheets for persistence
         if IS_CLOUD:
             save_orders_to_sheet(orders if isinstance(orders, list) else [])
         
         count = len(orders) if isinstance(orders, list) else 0
         return jsonify({'success': True, 'filename': filename, 'count': count})
     except Exception as e:
-        return jsonify({'error': f'ไฟล์ JSON ไม่ถูกต้อง: {str(e)}'}), 400
+        return jsonify({'error': f'เกิดข้อผิดพลาด: {str(e)}'}), 500
 
 
 @app.route('/api/sync-sheet', methods=['POST'])
