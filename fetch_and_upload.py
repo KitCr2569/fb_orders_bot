@@ -31,8 +31,11 @@ def main():
             print("❌ ดึง orders ไม่สำเร็จ")
             return
 
-    # Step 2: หาไฟล์ JSON ล่าสุด
-    json_files = sorted(OUTPUT_DIR.glob("orders_*.json"), reverse=True)
+    # Step 2: หาไฟล์ JSON ล่าสุด (เฉพาะไฟล์ที่มี timestamp)
+    json_files = sorted(
+        [f for f in OUTPUT_DIR.glob("orders_2*.json")],  # Only timestamped files
+        reverse=True
+    )
     if not json_files:
         print("❌ ไม่พบไฟล์ JSON ในโฟลเดอร์ output/")
         return
